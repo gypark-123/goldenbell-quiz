@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>성경 골든벨 퀴즈</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    input, select, textarea { font-size: 18px; } /* 큰 글씨 */
+    body { font-size: 18px; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+  <div class="max-w-5xl mx-auto p-4 sm:p-6">
+    <header class="flex items-center justify-between gap-4 mb-4">
+      <h1 class="text-3xl sm:text-4xl font-bold">성경 골든벨 퀴즈</h1>
+      <div class="text-sm text-slate-500">권 선택 · 랜덤 20문제 · 시험 모드(채점하기) · 오답노트 · 로컬저장 · PDF 인쇄</div>
+    </header>
+
+    <!-- 컨트롤 패널 -->
+    <section class="bg-white rounded-2xl shadow p-4 sm:p-6 mb-6">
+      <div class="grid sm:grid-cols-4 gap-4">
+        <div class="sm:col-span-2">
+          <div class="font-semibold mb-2">출제 범위</div>
+          <div id="scopeButtons" class="flex flex-wrap gap-2"></div>
+          <div id="bookFilters" class="hidden"></div>
+          <div class="text-xs text-slate-500 mt-2">※ "전체"를 선택하면 모든 권에서 출제됩니다.</div>
+        </div>
+        <div>
+          <div class="font-semibold mb-2">문항 수</div>
+          <input id="questionCount" type="number" min="1" max="50" value="20" class="w-28 border rounded-lg px-3 py-2" />
+          <div class="text-xs text-slate-500 mt-1">기본: 20문제</div>
+          <label class="mt-3 inline-flex items-center gap-2 text-sm"><input id="bigFontToggle" type="checkbox" class="w-4 h-4"/> 큰 글씨</label>
+        </div>
+        <div class="flex flex-col justify-end gap-2">
+          <button id="startBtn" class="px-4 py-2 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700">랜덤 출제 시작</button>
+          <button id="gradeBtn" class="px-4 py-2 rounded-xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700">채점하기</button>
+          <button id="retryWrongBtn" class="px-4 py-2 rounded-xl bg-amber-500 text-white font-semibold hover:bg-amber-600">오답만 다시풀기</button>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 mt-4">
+        <button id="exportWrongBtn" class="px-3 py-2 rounded-xl border font-medium">오답노트 내보내기</button>
+        <label class="px-3 py-2 rounded-xl border font-medium cursor-pointer">오답노트 불러오기<input id="importWrongInput" type="file" accept="application/json" class="hidden"/></label>
+        <button id="printBtn" class="px-3 py-2 rounded-xl border font-medium">결과 인쇄(PDF)</button>
+        <button id="resetAllBtn" class="px-3 py-2 rounded-xl border font-medium text-rose-600">전체 리셋</button>
+        <details class="ml-auto">
+          <summary class="px-3 py-2 rounded-xl border font-medium cursor-pointer">관리자 설정</summary>
+          <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+            <input id="adminCodeInput" type="password" placeholder="관리자 코드" class="border rounded-lg px-3 py-2"/>
+            <select id="adminScopeSelect" class="border rounded-lg px-2 py-2">
+              <option value="all">전체</option>
+              <option value="acts">사도행전</option>
+              <option value="peters">벧전·벧후</option>
+              <option value="deut">신명기</option>
+              <option value="jer">예레미야</option>
+              <option value="lam">예레미야 애가</option>
+            </select>
+            <button id="saveAdminBtn" class="px-3 py-2 rounded-lg border">코드/범위 저장</button>
+            <span class="text-xs text-slate-500">* 공유 시 ?lock=코드&scope=acts|peters|deut|jer|lam|all</span>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- 진행도 & 점수 -->
+    <section id="statusBar" class="hidden bg-white rounded-2xl shadow p-4 sm:p-6 mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-semibold">진행도</div>
+        <div class="text-sm"><span id="progressText">0/0</span> · 점수 <span id="scoreText">0</span></div>
+      </div>
+      <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+        <div id="progressBar" class="h-3 bg-indigo-600" style="width:0%"></div>
+      </div>
+      <div id="examNote" class="text-xs text-slate-500 mt-2">시험 모드: 정답은 <b>채점하기</b>를 눌러 공개됩니다.</div>
+    </section>
+
+    <!-- 퀴즈 영역 -->
+    <section id="quizArea" class="grid gap-4"></section>
+
+    <!-- 인쇄용 요약(인쇄 시에만 보이도록) -->
+    <section id="printSummary" class="hidden bg-white rounded-2xl shadow p-4 sm:p-6 mt-6 print:block">
+      <h2 class="text-xl font-bold mb-2">결과 요약</h2>
+      <div class="text-sm mb-2">총 문항: <span id="sumTotal">0</span> · 점수: <span id="sumScore">0</span></div>
+      <div id="sumList" class="mt-2 grid gap-2 text-sm"></div>
+    </section>
+
+    <style>
+      @media print{
+        body{ background:white; }
+        header, #wrongBook, #scopeButtons ~ *, details, #statusBar .w-full + *, #resetAllBtn, #exportWrongBtn, #importWrongInput, #retryWrongBtn, #startBtn, #gradeBtn, #printBtn{ display:none !important; }
+        #printSummary{ display:block !important; }
+      }
+    </style>
+
+    <!-- 오답노트 -->
+    <section class="bg-white rounded-2xl shadow p-4 sm:p-6 mt-6">
+      <details id="wrongBook" class="group" open>
+        <summary class="flex items-center justify-between cursor-pointer">
+          <div class="font-semibold">오답노트</div>
+          <span class="text-sm text-slate-500" id="wrongCount">0문제</span>
+        </summary>
+        <div id="wrongList" class="mt-4 grid gap-3"></div>
+      </details>
+    </section>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script>
+    const BOOKS = [
+      '사도행전', '베드로전서', '베드로후서', '신명기', '예레미야', '예레미야 애가'
+    ];
+
+    // 출제 범위 버튼 정의
+    const SCOPES = [
+      {key:'acts', label:'사도행전', books:['사도행전']},
+      {key:'peters', label:'벧전·벧후', books:['베드로전서','베드로후서']},
+      {key:'deut', label:'신명기', books:['신명기']},
+      {key:'jer', label:'예레미야', books:['예레미야']},
+      {key:'lam', label:'애가', books:['예레미야 애가']},
+      {key:'all', label:'전체', books:[...BOOKS]},
+    ];
+
+    // ===== 초기 렌더: 출제 범위 버튼 =====
+    const scopeButtons = document.getElementById('scopeButtons');
+    function renderScopes(disabled=false){
+      scopeButtons.innerHTML='';
+      SCOPES.forEach(s=>{
+        const btn = document.createElement('button');
+        btn.className = `px-3 py-2 rounded-xl border ${state.selectedScope===s.key?'bg-indigo-600 text-white border-indigo-600':'bg-white'} ${disabled?'opacity-60 pointer-events-none':''}`;
+        btn.textContent = s.label;
+        btn.addEventListener('click', ()=>{ state.selectedScope=s.key; saveSetting('selectedScope', s.key); renderScopes(disabled); });
+        scopeButtons.appendChild(btn);
+      });
+    }
+
+    // URL 파라미터에 의한 관리자 잠금 처리
+    const url = new URL(location.href);
+    const lockParam = url.searchParams.get('lock');
+    const scopeParam = url.searchParams.get('scope');
+    const adminOK = lockParam && state.adminCode && lockParam===state.adminCode;
+    var forcedScope = adminOK ? (SCOPES.find(s=>s.key===scopeParam)?.key || state.adminScope) : null;
+
+    renderScopes(!!forcedScope);
+
+    const SEED = [
+      { id: '행-1', book: '사도행전', type: 'short', question: '사도행전은 누구에게 쓴 편지인가요? (1:1)', answer: '데오빌로' },
+      { id: '벧전-1', book: '베드로전서', type: 'short', question: '우리는 택하신 족속이요 왕 같은 (    )들이다. (2:9)', answer: '제사장, 제사장들' },
+      { id: '신-1', book: '신명기', type: 'mc', question: '십계명 중 5계명은? (5:16)', options: ['간음하지 말라', '살인하지 말라', '네 부모를 공경하라', '도둑질하지 말라'], answer: 2 },
+      { id: '렘-1', book: '예레미야', type: 'short', question: '예레미야 1장의 두 환상은? (1:11-14)', answer: '살구나무 가지, 끓는 가마' },
+      { id: '애-1', book: '예레미야 애가', type: 'short', question: '애 3:22-23에 반복되는 두 단어는?', answer: '인자, 긍휼, 성실하심' }
+    ];
+
+    const state = {
+      pool: [...SEED],
+      current: [],
+      answers: {},
+      score: 0,
+      wrong: loadWrong(),
+      selectedBooks: new Set(BOOKS),
+    };
+
+    function loadWrong(){ try{ return JSON.parse(localStorage.getItem('goldenbell_wrong_v1'))||[] }catch{return[]} }
+    function saveWrong(){ localStorage.setItem('goldenbell_wrong_v1', JSON.stringify(state.wrong)); renderWrongList(); }
+
+    function shuffle(arr){ const a=[...arr]; for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]];} return a; }
+    function normalize(s){ return String(s).trim().replaceAll(/\s+/g,' ').toLowerCase(); }
+    function isCorrect(problem,user){ if(problem.type==='mc') return Number(user)===Number(problem.answer); const userN=normalize(user); return String(problem.answer).split(',').map(a=>normalize(a)).some(a=>a&&userN.includes(a)); }
+
+    const bookFilters=document.getElementById('bookFilters');
+    BOOKS.forEach(b=>{
+      const id='book_'+b;
+      const wrap=document.createElement('label');
+      wrap.className='inline-flex items-center gap-2';
+      wrap.innerHTML=`<input id="${id}" type="checkbox" class="w-5 h-5" checked> <span>${b}</span>`;
+      bookFilters.appendChild(wrap);
+      wrap.querySelector('input').addEventListener('change',e=>{ if(e.target.checked) state.selectedBooks.add(b); else state.selectedBooks.delete(b); });
+    });
+
+    document.getElementById('startBtn').addEventListener('click', startQuiz);
+    document.getElementById('retryWrongBtn').addEventListener('click', startWrongOnly);
+    document.getElementById('exportWrongBtn').addEventListener('click', exportWrong);
+    document.getElementById('importWrongInput').addEventListener('change', importWrong);
+    document.getElementById('resetAllBtn').addEventListener('click', ()=>{
+      if(confirm('모든 진행상황과 오답노트를 삭제할까요?')){
+        localStorage.removeItem('goldenbell_wrong_v1');
+        ['selectedScope','bigFont','adminCode','adminScope'].forEach(k=>localStorage.removeItem('goldenbell_setting_'+k));
+        state.wrong = [];
+        state.current = [];
+        state.answers = {};
+        state.graded = false;
+        state.score = 0;
+        // 시험 모드용 함수들(기존 함수들을 아래에서 재정의하여 동작 변경)
+    function scopeToBooks(){
+      const sKey = (typeof forcedScope==='string' && forcedScope) ? forcedScope : state.selectedScope;
+      return SCOPES.find(s=>s.key===sKey)?.books || BOOKS;
+    }
+    function buildPool(){
+      const books = scopeToBooks();
+      return state.pool.filter(p=>books.includes(p.book));
+    }
+    function startQuiz(){
+      const count = Math.max(1, Math.min(50, Number(document.getElementById('questionCount').value)||20));
+      const pool = buildPool();
+      if(pool.length===0){ alert('선택된 범위에 문제가 없습니다.'); return; }
+      state.current = shuffle(pool).slice(0, count);
+      state.answers = {};
+      state.graded = false;
+      state.score = 0;
+      renderAll();
+      window.scrollTo({top:0, behavior:'smooth'});
+    }
+    function startWrongOnly(){
+      if(state.wrong.length===0){ alert('오답노트가 비어 있습니다.'); return; }
+      const count = Math.max(1, Math.min(50, Number(document.getElementById('questionCount').value)||20));
+      state.current = shuffle(state.wrong).slice(0, count);
+      state.answers = {};
+      state.graded = false;
+      state.score = 0;
+      renderAll();
+      window.scrollTo({top:0, behavior:'smooth'});
+    }
+    function gradeExam(){
+      if(state.current.length===0){ alert('먼저 출제를 시작하세요.'); return; }
+      let score = 0; const wrongToAdd=[];
+      state.current.forEach(p=>{
+        const ans = state.answers[p.id]?.user;
+        const correct = ans!==undefined && isCorrect(p, ans);
+        if(correct) score+=1; else wrongToAdd.push(p);
+        state.answers[p.id] = { user: ans, correct };
+      });
+      state.score = score; state.graded = true;
+      const map = new Map(state.wrong.map(w=>[w.id,w]));
+      wrongToAdd.forEach(p=>{ map.set(p.id,p); });
+      state.wrong = [...map.values()];
+      saveWrong();
+      renderAll();
+      buildPrintSummary();
+      alert(`채점 완료! 점수: ${score} / ${state.current.length}`);
+    }
+    function renderStatus(){
+      const box = document.getElementById('statusBar');
+      const total = state.current.length;
+      const solved = Object.values(state.answers).filter(a=>a?.user!==undefined && a?.user!=='').length;
+      const score = state.score;
+      document.getElementById('progressText').textContent = `${solved}/${total}`;
+      document.getElementById('scoreText').textContent = score;
+      document.getElementById('progressBar').style.width = total? `${Math.round((state.graded?total:solved)/total*100)}%` : '0%';
+      box.classList.toggle('hidden', total===0);
+    }
+    function renderQuiz(){
+      const wrap = document.getElementById('quizArea');
+      wrap.innerHTML='';
+      wrap.classList.toggle('text-lg', !!state.bigFont);
+      state.current.forEach((p,idx)=>{
+        const card = document.createElement('div');
+        card.className = 'bg-white rounded-2xl shadow p-4 sm:p-6';
+        const qNum = idx+1;
+        const record = state.answers[p.id] || {};
+
+        const title = `<div class=\"flex items-start justify-between gap-3 mb-3\">
+            <div class=\"text-sm text-slate-500\">${p.book}</div>
+            <div class=\"text-xs text-slate-400\">ID: ${p.id}</div>
+          </div>
+          <div class=\"font-semibold mb-3\">${qNum}. ${p.question}</div>`;
+
+        let body='';
+        if(p.type==='mc' && Array.isArray(p.options)){
+          body += '<div class="grid gap-2">';
+          p.options.forEach((opt,i)=>{
+            const selected = Number(record.user)===i;
+            const correctOpt = Number(p.answer)===i;
+            let style = selected? 'ring-2 ring-slate-400 border-slate-400 bg-slate-50' : '';
+            if(state.graded){
+              if(correctOpt) style = 'ring-2 ring-green-500 border-green-500 bg-green-50';
+              else if(selected && !correctOpt) style = 'ring-2 ring-rose-500 border-rose-500 bg-rose-50';
+            }
+            body += `<button data-qid=\"${p.id}\" data-idx=\"${i}\" class=\"mcopt text-left border rounded-xl px-3 py-2 ${style}\">${i+1}. ${opt}</button>`;
+          });
+          body += '</div>';
+        } else {
+          const val = record.user ?? '';
+          const hint = state.graded ? (state.answers[p.id]?.correct? `<div class=\\"text-sm text-green-600\\">정답!</div>` : `<div class=\\"text-sm text-rose-600\\">정답: <span class=\\"font-mono\\">${escapeHtml(String(p.answer))}</span></div>`) : '<div class="text-xs text-slate-500">엔터/포커스 아웃 시 답안 저장</div>';
+          body += `<input data-qid=\"${p.id}\" type=\"text\" placeholder=\"정답을 입력하세요\" value=\"${val?String(val).replace(/\"/g,'&quot;'):''}\" class=\"w-full border rounded-xl px-3 py-2 mb-2\" ${state.graded?'disabled':''}/>`;
+          body += hint;
+        }
+
+        card.innerHTML = title + body;
+        wrap.appendChild(card);
+      });
+
+      wrap.querySelectorAll('button.mcopt').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          if(state.graded) return;
+          const qid = btn.getAttribute('data-qid');
+          const idx = Number(btn.getAttribute('data-idx'));
+          handleAnswer(qid, idx);
+        });
+      });
+      wrap.querySelectorAll('input[type="text"]').forEach(inp=>{
+        inp.addEventListener('change', ()=>{
+          if(state.graded) return; handleAnswer(inp.getAttribute('data-qid'), inp.value);
+        });
+        inp.addEventListener('keydown', (e)=>{
+          if(e.key==='Enter'){
+            e.preventDefault(); if(state.graded) return; handleAnswer(inp.getAttribute('data-qid'), inp.value);
+          }
+        });
+      });
+    }
+    function escapeHtml(str){
+      return str.replace(/[&<>\"]/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;' }[m]));
+    }
+    function handleAnswer(qid, user){
+      const p = state.current.find(x=>x.id===qid);
+      if(!p) return;
+      const prev = state.answers[qid] || {};
+      state.answers[qid] = { ...prev, user };
+      renderAll();
+    }
+    function renderWrongList(){
+      const list = document.getElementById('wrongList');
+      const count = state.wrong.length;
+      document.getElementById('wrongCount').textContent = `${count}문제`;
+      list.innerHTML = '';
+      if(count===0){
+        list.innerHTML = '<div class="text-sm text-slate-500">오답이 없습니다.</div>';
+        return;
+      }
+      state.wrong.forEach((p,i)=>{
+        const row = document.createElement('div');
+        row.className = 'border rounded-xl p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2';
+        row.innerHTML = `
+          <div>
+            <div class="text-xs text-slate-500">${p.book} · ${p.id}</div>
+            <div class="font-medium">${i+1}. ${p.question}</div>
+            <div class="text-sm text-slate-600">정답: <span class="font-mono">${escapeHtml(String(p.answer))}</span></div>
+          </div>
+          <div class="flex gap-2">
+            <button data-id="${p.id}" class="retryOne px-3 py-2 rounded-lg border">다시 풀기</button>
+            <button data-id="${p.id}" class="removeOne px-3 py-2 rounded-lg border text-rose-600">삭제</button>
+          </div>`;
+        list.appendChild(row);
+      });
+      list.querySelectorAll('button.removeOne').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          removeWrongById(btn.getAttribute('data-id'));
+          renderAll();
+        });
+      });
+      list.querySelectorAll('button.retryOne').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const id = btn.getAttribute('data-id');
+          const p = state.wrong.find(x=>x.id===id);
+          if(!p) return;
+          state.current = [p];
+          state.answers = {};
+          state.graded = false;
+          state.score = 0;
+          renderAll();
+          window.scrollTo({top:0, behavior:'smooth'});
+        });
+      });
+    }
+    function buildPrintSummary(){
+      const sum = document.getElementById('sumList');
+      document.getElementById('sumTotal').textContent = state.current.length;
+      document.getElementById('sumScore').textContent = state.score;
+      sum.innerHTML='';
+      state.current.forEach((p,i)=>{
+        const rec = state.answers[p.id]||{};
+        let userText='';
+        if(p.type==='mc' && Array.isArray(p.options)){
+          userText = rec.user!==undefined? `${Number(rec.user)+1}. ${p.options[Number(rec.user)]||''}` : '(무응답)';
+        } else {
+          userText = rec.user? String(rec.user) : '(무응답)';
+        }
+        const correctText = p.type==='mc'? `${Number(p.answer)+1}. ${p.options[Number(p.answer)]}` : String(p.answer);
+        const row = document.createElement('div');
+        row.innerHTML = `<div class=\"text-xs text-slate-500\">${p.book} · ${p.id}</div>
+                         <div class=\"font-medium\">${i+1}. ${p.question}</div>
+                         <div class=\"text-sm\">내 답: ${escapeHtml(userText)} · 정답: <span class=\"font-mono\">${escapeHtml(correctText)}</span></div>`;
+        sum.appendChild(row);
+      });
+    }
+    function applyBigFont(){
+      document.getElementById('quizArea').classList.toggle('text-lg', !!state.bigFont);
+      const bigT = document.getElementById('bigFontToggle'); if(bigT) bigT.checked = !!state.bigFont;
+    }
+    applyBigFont();
+    renderAll();
+      }
+    });
+    // 추가 버튼
+    document.getElementById('gradeBtn').addEventListener('click', gradeExam);
+    document.getElementById('printBtn').addEventListener('click', ()=>window.print());
+    document.getElementById('bigFontToggle').addEventListener('change', (e)=>{ state.bigFont = e.target.checked; saveSetting('bigFont', state.bigFont?1:0); applyBigFont(); });
+    document.getElementById('saveAdminBtn').addEventListener('click', ()=>{
+      const code = document.getElementById('adminCodeInput').value.trim();
+      const scope = document.getElementById('adminScopeSelect').value;
+      if(!code){ alert('관리자 코드를 입력하세요.'); return; }
+      state.adminCode = code; state.adminScope = scope;
+      saveSetting('adminCode', code); saveSetting('adminScope', scope);
+      alert('관리자 코드/범위를 저장했습니다. 공유 링크 예시: ?lock='+code+'&scope='+scope);
+    }); state.wrong=[]; state.current=[]; state.answers={}; state.score=0; renderAll(); }});
+    document.getElementById('exportPdfBtn').addEventListener('click', exportPdf);
+
+    function buildPool(){ return state.pool.filter(p=>state.selectedBooks.has(p.book)); }
+    function startQuiz(){ const count=Math.min(50,Number(document.getElementById('questionCount').value)||20); const pool=buildPool(); state.current=shuffle(pool).slice(0,count); state.answers={}; state.score=0; renderAll(); window.scrollTo({top:0,behavior:'smooth'}); }
+    function startWrongOnly(){ if(state.wrong.length===0){alert('오답노트가 비어 있습니다.');return;} const count=Math.min(50,Number(document.getElementById('questionCount').value)||20); state.current=shuffle(state.wrong).slice(0,count); state.answers={}; state.score=0; renderAll(); window.scrollTo({top:0,behavior:'smooth'}); }
+
+    function renderAll(){ renderStatus(); renderQuiz(); renderWrongList(); }
+
+    function renderStatus(){ const total=state.current.length; const solved=Object.keys(state.answers).length; document.getElementById('progressText').textContent=`${solved}/${total}`; document.getElementById('scoreText').textContent=state.score; document.getElementById('progressBar').style.width=total?`${Math.round(solved/total*100)}%`:'0%'; document.getElementById('statusBar').classList.toggle('hidden',total===0); }
+
+    function renderQuiz(){ const wrap=document.getElementById('quizArea'); wrap.innerHTML=''; state.current.forEach((p,idx)=>{ const card=document.createElement('div'); card.className='bg-white rounded-2xl shadow p-4 sm:p-6'; const qNum=idx+1; const answered=state.answers[p.id]; let body='';
+      if(p.type==='mc'&&Array.isArray(p.options)){
+        body+='<div class="grid gap-2">'; p.options.forEach((opt,i)=>{ const selected=answered&&Number(answered.user)===i; const showState=answered!==undefined; const style=showState?(Number(p.answer)===i?'ring-2 ring-green-500 bg-green-50':(selected?'ring-2 ring-rose-500 bg-rose-50':'')):''; body+=`<button data-qid="${p.id}" data-idx="${i}" class="mcopt text-left border rounded-xl px-3 py-2 ${style}">${i+1}. ${opt}</button>`; }); body+='</div>';
+      } else {
+        const val=answered?answered.user:''; const correct=answered?answered.correct:null; body+=`<input data-qid="${p.id}" type="text" placeholder="정답" value="${val}" class="w-full border rounded-xl px-3 py-2 mb-2"/>`; if(correct===true){body+='<div class="text-green-600">정답!</div>';} else if(correct===false){body+=`<div class="text-rose-600">오답 · 정답: ${p.answer}</div>`;} body+='<div class="text-xs text-slate-500">입력 후 엔터</div>';
+      }
+      card.innerHTML=`<div class="text-sm text-slate-500">${p.book}</div><div class="font-semibold mb-3">${qNum}. ${p.question}</div>`+body; wrap.appendChild(card); });
+      wrap.querySelectorAll('button.mcopt').forEach(btn=>btn.addEventListener('click',()=>handleAnswer(btn.dataset.qid,Number(btn.dataset.idx))));
+      wrap.querySelectorAll('input').forEach(inp=>{inp.addEventListener('change',()=>handleAnswer(inp.dataset.qid,inp.value)); inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();handleAnswer(inp.dataset.qid,inp.value);}});});
+    }
+
+    function handleAnswer(qid,user){ const p=state.current.find(x=>x.id===qid); if(!p)return; const correct=isCorrect(p,user); const prev=state.answers[qid]; if(!prev){ if(correct) state.score+=1; else addWrong(p);} else { if(!prev.correct&&correct){ state.score+=1; removeWrongById(p.id);} if(prev.correct&&!correct){ addWrong(p);} } state.answers[qid]={correct,user}; renderAll(); }
+
+    function addWrong(p){ if(!state.wrong.find(w=>w.id===p.id)){ state.wrong.push(p); saveWrong(); } }
+    function removeWrongById(id){ const idx=state.wrong.findIndex(w=>w.id===id); if(idx>-1){ state.wrong.splice(idx,1); saveWrong(); } }
+
+    function renderWrongList(){ const list=document.getElementById('wrongList'); document.getElementById('wrongCount').textContent=`${state.wrong.length}문제`; list.innerHTML= state.wrong.length?'' : '<div class="text-slate-500">오답이 없습니다.</div>'; state.wrong.forEach((p,i)=>{ const row=document.createElement('div'); row.className='border rounded-xl p-3'; row.innerHTML=`<div class="text-sm">${p.book} · ${p.id}</div><div>${i+1}. ${p.question}</div><div class="text-slate-600">정답: ${p.answer}</div>`; list.appendChild(row); }); }
+
+    function exportWrong(){ const blob=new Blob([JSON.stringify(state.wrong,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url;a.download='goldenbell_wrong.json';a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000); }
+    function importWrong(ev){ const file=ev.target.files&&ev.target.files[0]; if(!file)return; const reader=new FileReader(); reader.onload=()=>{ try{ const data=JSON.parse(reader.result); if(Array.isArray(data)){ const map=new Map(state.wrong.map(w=>[w.id,w])); data.forEach(p=>{if(p&&p.id)map.set(p.id,p);}); state.wrong=[...map.values()]; saveWrong(); alert('불러오기 완료'); }else throw new Error(); }catch{alert('실패');} }; reader.readAsText(file); ev.target.value=''; }
+
+    function exportPdf(){ const { jsPDF } = window.jspdf; const doc=new jsPDF(); doc.setFontSize(12); doc.text('성경 골든벨 퀴즈 결과',10,10); let y=20; state.current.forEach((p,i)=>{ const ans=state.answers[p.id]; doc.text(`${i+1}. ${p.question}`,10,y); y+=7; if(ans){ doc.text(`▶ 내 답: ${ans.user}`,10,y); y+=7; doc.text(`정답: ${p.answer}`,10,y); y+=7;} if(y>270){ doc.addPage(); y=20;} }); doc.save('quiz_result.pdf'); }
+
+    renderAll();
+  </script>
+</body>
+</html>
